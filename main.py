@@ -1,42 +1,26 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, Response
 import pyodbc
 import os
 from werkzeug.utils import secure_filename
 import datetime
+import threading
+import cv2
+import numpy as np
 
 app = Flask(__name__, static_folder='static', template_folder='static/templates')
 
 
-temp_hum_list = [[], [], []]
-settings = {
-    "day_gain": 10,
-    "day_exp": 10,
-    "day_int": 30,
-    "night_gain": 10,
-    "night_exp": 10,
-    "night_int": 30
-}
-
-# Configuration for MSSQL
-db_config = {
-    'server': 'localhost',
-    'database': 'cameraDB',
-    'username': 'SA',
-    'password': 'server@2025'
-}
-
-connection_string = (
-    f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-    f'SERVER=ALIENWARE;'
-    f'DATABASE={db_config['database']};'
-    f'Trusted_Connection=yes;'
-)
-
-IMAGE_FOLDER = 'image/png'
+frame_lock = threading.Lock()
+latest_frame = None
 
 
 @app.route('/')
 def index():
+    return render_template('testing.html')
+
+
+@app.route('/debug')
+def debug():
     return render_template('gallery.html')
 
 
@@ -45,23 +29,9 @@ def management_system():
     return render_template('login.html')
 
 
-@app.route('/get_images', methods=['POST'])
-def get_images():
-    offset = int(request.json.get('offset', 0))
-    limit = int(request.json.get('limit', 20))
-    cmd = 'SELECT imgName FROM ImageInfo ORDER BY [datetime] OFFSET ? ROWS FETCH NEXT ? ROWS ONLY'
-    sql_query = request.json.get('query', cmd)
-
-    try:
-        with pyodbc.connect(connection_string) as conn:
-            cursor = conn.cursor()
-            if 'OFFSET' not in sql_query:
-                sql_query += f' OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY'
-            cursor.execute(sql_query)
-            images = [row[0] for row in cursor.fetchall()]
-        return jsonify({'status': 'success', 'images': images})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
+@app.route('/download_fits/<name>')
+def download_fits(name):
+    return send_from_directory(directory="static/images", path=name, as_attachment=True)
 
 
 @app.route('/download_images', methods=['POST'])
@@ -105,10 +75,12 @@ def upload_image():
         folder = "png"
     elif filename.endswith('.fits'):
         folder = "fits"
+    elif filename.endswith('.jpg'):
+        folder = "jpg"
     else:
         return jsonify({'error': 'Invalid file format'}), 400
 
-    path = os.path.join("static/images", folder, filename)
+    path = os.path.join("app/static/images", folder, filename)
     file.save(path)
     return jsonify({'message': f"File {filename} uploaded"}), 201
 
@@ -165,8 +137,8 @@ def verify(username, password):
 def images(page: int):
 
     def unpack_specs(f: str):
-        _, datetime, exp, gain = f.split('_')
-        return datetime, exp, gain, 0
+        _, dt = f.split('_')
+        return dt, 0, 0
 
     img_w_specs = [
         (f, *unpack_specs(f))
@@ -175,12 +147,13 @@ def images(page: int):
 
     def sort_func(i):
         fname = i[0]
-        _, timestamp_str, _, _ = fname.split('_')
-        timestamp_dt = datetime.datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+        fname = fname.split(".")[0]
+        camid, timestamp_str = fname.split('_')
+        timestamp_dt = datetime.datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S")
         return timestamp_dt
 
     img_w_specs = sorted(img_w_specs, key=sort_func, reverse=True)
-
+    print(img_w_specs)
     page_start = page * 8
     page_end = page_start + 8
 
@@ -188,12 +161,9 @@ def images(page: int):
 
 
 def scan_images() -> list[str]:
-    img_dir = 'static/images/png'
-    return [
-        f.rstrip('.png')
-        for f in os.listdir(img_dir)
-        if f.endswith('.png')
-    ]
+    img_dir = 'app/static/images/'
+    return [f.rstrip(".png") for f in os.listdir(img_dir) if f.endswith('.png')]
+
 
 @app.route('/get_total_pages')
 def get_total_pages():
@@ -203,12 +173,40 @@ def get_total_pages():
     return jsonify({"totalPages": pages})
 
 
+@app.route('/upload_live', methods=['POST'])
+def upload_frame():
+    global latest_frame
+    data = request.data
+    np_arr = np.frombuffer(data, np.uint8)
+    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+    with frame_lock:
+        latest_frame = frame
+    return 'OK'
+
+
+def generate_stream():
+    global latest_frame
+    while True:
+        with frame_lock:
+            if latest_frame is None:
+                continue
+            # Encode the frame in JPEG
+            ret, jpeg = cv2.imencode('.jpg', latest_frame)
+            if not ret:
+                continue
+            frame_data = jpeg.tobytes()
+
+        # MJPEG streaming
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
+
+
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_stream(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
 if __name__ == '__main__':
-    internal_states = {
-        'settings': {'gain': 150, 'offset': 0, 'exposure': 100000, 'interval': 0},
-        'current_tag': None,
-        'displaying_list': scan_images(),
-        'eta': "",
-    }
-#    app.run(port=5000, host='0.0.0.0')
     app.run(debug=True, port=80, host='0.0.0.0')
