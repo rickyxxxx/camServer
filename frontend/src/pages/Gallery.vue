@@ -2,9 +2,9 @@
 import {ref, onMounted, onBeforeUnmount, useTemplateRef} from 'vue'
 import axios from 'axios'
 
-import ImageCard from './components/ImageCard.vue'
-import Sidebar from "./components/Sidebar.vue";
-import ActionBar from "./components/ActionBar.vue";
+import ImageCard from '../components/ImageCard.vue'
+import Sidebar from "../components/Sidebar.vue";
+import ActionBar from "../components/ActionBar.vue";
 
 
 let resizeObserver
@@ -43,6 +43,11 @@ function onCardStarred(imgSpec) {
     starList.value.push(imgSpec)
     console.log(starList.value)
 }
+//
+// function onStarRemoved() {
+//     clearSearch()
+//     images.value = starList.value
+// }
 
 function updateNumberOfColumns() {
     if (!container["value"])    // make sure the image container is loaded
