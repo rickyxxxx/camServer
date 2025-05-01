@@ -21,8 +21,9 @@ class Database:
         self.cursor.execute(query)
         return self.cursor.fetchall()
 
-    def execute(self, cmd: str, values: tuple) -> None:
-        self.cursor.execute(cmd, values)
+    def execute(self, cmd: str, *values: tuple) -> None:
+        # self.cursor.execute(cmd, values)
+        self.cursor.execute(cmd)
         self.conn.commit()
 
     def insert_image(self, image_path: str, spec: dict) -> None:

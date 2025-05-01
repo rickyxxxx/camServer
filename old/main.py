@@ -2,6 +2,8 @@ import os
 import datetime
 import threading
 import cv2
+from flask_cors import CORS
+
 
 import numpy as np
 from flask import Flask, render_template, request, jsonify, send_from_directory, Response, send_file
@@ -10,6 +12,7 @@ from flask import Flask, render_template, request, jsonify, send_from_directory,
 from app.database import Database
 
 app = Flask(__name__, static_folder='static')
+CORS(app)  # This will allow all domains by default
 db = Database()
 
 frame_lock = threading.Lock()
@@ -19,43 +22,70 @@ latest_frame = None
 settings = {}
 
 
-@app.route('/')
-def index():
-    return render_template('testing.html')
+# @app.route('/debug')
+# def debug():
+#     return render_template('gallery.html')
+#
+# @app.route('/CMS')
+# def CMS():
+#     return render_template('camera_manager.html')
+#
+# # return a list of image files path that matches the filtering condition
+# @app.route('/search/<datetime_list>')
+# def search(datetime_list):
+#     if datetime_list == "None":
+#         return jsonify(db.search_images_by_date())
+#
+#     datetime_periods = datetime_list.split(";")
+#     datetime_periods = [dt.split(',') for dt in datetime_periods]
+#
+#     return jsonify(db.search_images_by_date(datetime_periods))
 
 
-@app.route('/debug')
-def debug():
-    return render_template('gallery.html')
-
-@app.route('/CMS')
-def CMS():
-    return render_template('camera_manager.html')
-
-# @app.route('/download/<path:filepath>')
-# def download(filepath):
-#     #TODO: add a path filter to restricts the folders that can be accessed
-#     return send_file(directory='', path=f"/{filepath}", as_attachement=True)
+@app.route('/api/image/<path:filename>')
+def serve_image(filename):
+    return send_file(f"/{filename}", as_attachment=True)
 
 
-# @app.route('/upload/<kind>', methods=['POST'])
-# def upload(kind):
-#     if kind == "file":
-#         pass
-#     elif kind == "":
-#         pass
+@app.route('/api/query/')
+def api_query():
+    get = request.args.get
 
+    # the number of images to be loaded, default 20 images per page
+    pagesize = get('pagesize', 20)
 
-# return a list of image files path that matches the filtering condition
-@app.route('/search/<datetime_list>')
-def search(datetime_list):
-    if datetime_list == "None":
-        return jsonify(db.search_images_by_date())
+    # sql query conditions (single string), default None
+    conditions = get('conditions')
 
-    datetime_periods = datetime_list.split(";")
-    datetime_periods = [dt.split(',') for dt in datetime_periods]
+    # whether to display the images in an arising or declining order
+    order = get('order', 'DESC')
 
-    return jsonify(db.search_images_by_date(datetime_periods))
+    # image id of the last image, used to mark the start of pagination
+    last_uid = get('lastUID')
+
+    # generate a sql command
+    header = ["image", "datetime", "expTime", "eGain", "siteName", "UID", "timeZone"]
+    fields = ["Images.ImgPath", "Images.[Datetime]", "Images.ExpTime", "Images.Gain", "Cameras.SiteName", "Images.UID",
+              "Images.timeZone"]
+    table = "Images INNER JOIN Cameras ON Images.CamId = Cameras.CamId"
+    sql = f"SELECT {",".join(fields)} FROM {table} "
+
+    if conditions or last_uid:
+        sql += "WHERE "
+
+    if conditions:
+        sql += f"{conditions} "
+
+    if last_uid:
+        if conditions:
+            sql += "and "
+        sql += f"Images.UID {order == "DESC" and "<" or ">"} {last_uid} "
+
+    sql += f"ORDER BY Images.[Datetime] {order} OFFSET 0 ROWS FETCH NEXT {pagesize} ROWS ONLY"
+
+    result = db.query(sql)
+    result = [{k: v for k, v in zip(header, row)} for row in result]
+    return jsonify(result)
 
 
 @app.route("/get_file/<path:filepath>")
@@ -85,33 +115,33 @@ def get_file(filepath):
 #     return send_from_directory(directory=download_folder, path='.', as_attachment=True)
 
 
-@app.route('/upload_image', methods=['POST'])
-def upload_image():
-    try:
-        file = request.files['file']
-        spec = request.form
-        filename = file.filename
-    except Exception:
-        return jsonify({'error': 'No file part in the request'}), 400
-
-    path = os.path.join("/mnt/CamData/images", filename)
-
-    if filename.endswith(".jpg"):
-        db.insert_image(path.rstrip(".jpg"), spec)
-
-    file.save(path)
-    return jsonify({'message': f"File {filename} uploaded"}), 201
-
-
-@app.route('/upload_data/', methods=['POST'])
-def upload_data():
-    try:
-        db.insert_temp_humidity(request.form)
-    except Exception as e:
-        print(e)
-        return jsonify({'error': 'No message provided'}), 400
-
-    return jsonify({'message': 'Data uploaded'}), 201
+# @app.route('/upload_image', methods=['POST'])
+# def upload_image():
+#     try:
+#         file = request.files['file']
+#         spec = request.form
+#         filename = file.filename
+#     except Exception:
+#         return jsonify({'error': 'No file part in the request'}), 400
+#
+#     path = os.path.join("/mnt/CamData/images", filename)
+#
+#     if filename.endswith(".jpg"):
+#         db.insert_image(path.rstrip(".jpg"), spec)
+#
+#     file.save(path)
+#     return jsonify({'message': f"File {filename} uploaded"}), 201
+#
+#
+# @app.route('/upload_data/', methods=['POST'])
+# def upload_data():
+#     try:
+#         db.insert_temp_humidity(request.form)
+#     except Exception as e:
+#         print(e)
+#         return jsonify({'error': 'No message provided'}), 400
+#
+#     return jsonify({'message': 'Data uploaded'}), 201
 
 
 # @app.route('/download_data_csv')
@@ -119,16 +149,16 @@ def upload_data():
 #     return send_from_directory(directory='.', path='camData.csv', as_attachment=True)
 
 
-@app.route('/get_setting/<camId>')
-def get_setting(camId):
-    return jsonify(settings)
-#
-#
-@app.route('/set_setting/<camId>', methods=['POST'])
-def set_setting(camId):
-    settings.update(request.json)
-    return jsonify({'status':
-    'success'})
+# @app.route('/get_setting/<camId>')
+# def get_setting(camId):
+#     return jsonify(settings)
+# #
+# #
+# @app.route('/set_setting/<camId>', methods=['POST'])
+# def set_setting(camId):
+#     settings.update(request.json)
+#     return jsonify({'status':
+#     'success'})
 
 
 # @app.route('/verify/<username>/<password>')
