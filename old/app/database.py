@@ -21,16 +21,26 @@ class Database:
         self.cursor.execute(query)
         return self.cursor.fetchall()
 
-    def execute(self, cmd: str, *values: tuple) -> None:
-        # self.cursor.execute(cmd, values)
+    def execute(self, cmd: str, values: tuple) -> None:
+        self.cursor.execute(cmd, values)
+        # self.cursor.execute(cmd)
+        self.conn.commit()
+
+    def exe_(self, cmd):
         self.cursor.execute(cmd)
         self.conn.commit()
 
+    # def insert_image(self, image_path: str, spec: dict) -> None:
+    #     cmd = ("INSERT INTO Images (CamID, CamName, [Datetime], BitDepth, Gain, ExpTime, GeoLoc, ImgPath) "
+    #            "VALUES (?, ?, ?, ?, ?, ?, geography::STGeomFromText(?, 4326), ?)")
+    #     geo = f"POINT({spec["lng"]} {spec["lat"]})"
+    #     values = spec["id"], spec["name"], spec["date"], spec['bit'], spec["gain"], spec['exp'], geo, image_path
+    #     self.execute(cmd, values)
+
     def insert_image(self, image_path: str, spec: dict) -> None:
-        cmd = ("INSERT INTO Images (CamID, CamName, [Datetime], BitDepth, Gain, ExpTime, GeoLoc, ImgPath) "
-               "VALUES (?, ?, ?, ?, ?, ?, geography::STGeomFromText(?, 4326), ?)")
-        geo = f"POINT({spec["lng"]} {spec["lat"]})"
-        values = spec["id"], spec["name"], spec["date"], spec['bit'], spec["gain"], spec['exp'], geo, image_path
+        cmd = (f"INSERT INTO Images (ImgPath, CamId, Timestamp, BitDepth, Gain, ExpTime, Humidity, Temperature, "
+               f"TimeZone, IsDayTime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        values = image_path, spec["id"], spec["date"], spec["bit"], spec["gain"], spec["exp"], spec["hum"], spec["temp"], spec["tz"], spec["isDay"]
         self.execute(cmd, values)
 
     def insert_temp_humidity(self, spec: dict) -> None:

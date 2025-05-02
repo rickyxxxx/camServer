@@ -11,7 +11,7 @@ const downloadOptions = ref('fits')
 const imageRef = useTemplateRef('imageRef')
 
 const imagePath = computed(() => `${props.rootURL}api/image/${props.imgSpec.image}.jpg`)
-const starImg = computed(() => `../../public/star${starred.value ? "-fill" : ""}.png`)
+const starImg = computed(() => `http://camserver.physics.ucsb.edu/static/dist/star${starred.value ? "-fill" : ""}.png`)
 const isFlipped = computed(() => Math.floor(props.index / props.columns) % 2 === 0)
 const timezone = props.imgSpec.timeZone
 
@@ -49,6 +49,10 @@ const tempWithUnit = computed(() => {
     const temp = parseFloat(props.imgSpec['temp'])
     return `${temp.toFixed(1)}°C`
 })
+const hum = computed(() => {
+    const humidity = parseFloat(props.imgSpec['humidity'])
+    return `${humidity.toFixed(1)}%`
+})
 
 function onImageClicked() {
     // enter fullscreen mode if image is clicked or exit fullscreen mode if already in fullscreen
@@ -67,9 +71,10 @@ async function onDownloadClicked() {
     } else if (downloadOptions.value === 'jpg') {
         window.location.href = imagePath.value;
     } else if (downloadOptions.value === 'png') {
-        await new astro.FITS(fitsPath, toPNG)
+        window.location.href = `${props.rootURL}temp/png/${props.imgSpec.image}.fits`
+        // await new astro.FITS(fitsPath, toPNG)
     } else if (downloadOptions.value === 'tiff') {
-        await new astro.FITS(fitsPath, toTiff)
+      window.location.href = `${props.rootURL}temp/tiff/${props.imgSpec.image}.fits`
     }
 }
 
@@ -223,7 +228,7 @@ onMounted(() => {
                     <p>{{localFormatted}}</p>
                     <p>{{utcFormatted}}</p>
                     <p>Exp/Gain: {{expWithUnit}}/{{imgSpec["eGain"]}}</p>
-                    <p>Temp/Humidity: {{tempWithUnit}}/{{imgSpec["humidity"]}}%</p>
+                    <p>Temp/Humidity: {{tempWithUnit}}/{{hum}}</p>
                 </div>
                 <div class="card-actions">
                     <button @click="onImageClicked">Preview</button>

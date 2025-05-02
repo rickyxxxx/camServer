@@ -2,11 +2,14 @@ import os
 import datetime
 import threading
 import cv2
+from astropy.io import fits
 from flask_cors import CORS
 
+from PIL import Image
+from io import BytesIO
 
 import numpy as np
-from flask import Flask, render_template, request, jsonify, send_from_directory, Response, send_file
+from flask import Flask, render_template, request, jsonify, send_from_directory, Response, send_file, abort
 
 
 from app.database import Database
@@ -20,6 +23,11 @@ latest_frame = None
 
 
 settings = {}
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
 
 
 # @app.route('/debug')
@@ -64,9 +72,9 @@ def api_query():
     last_uid = get('lastUID')
 
     # generate a sql command
-    header = ["image", "datetime", "expTime", "eGain", "siteName", "UID", "timeZone"]
-    fields = ["Images.ImgPath", "Images.[Datetime]", "Images.ExpTime", "Images.Gain", "Cameras.SiteName", "Images.UID",
-              "Images.timeZone"]
+    header = ["image", "datetime", "expTime", "eGain", "siteName", "UID", "timeZone", "humidity", "temp"]
+    fields = ["Images.ImgPath", "Images.Timestamp", "Images.ExpTime", "Images.Gain", "Cameras.SiteName", "Images.ImgId",
+              "Images.timeZone", "Images.Humidity", "Images.Temperature"]
     table = "Images INNER JOIN Cameras ON Images.CamId = Cameras.CamId"
     sql = f"SELECT {",".join(fields)} FROM {table} "
 
@@ -79,18 +87,130 @@ def api_query():
     if last_uid:
         if conditions:
             sql += "and "
-        sql += f"Images.UID {order == "DESC" and "<" or ">"} {last_uid} "
+        sql += f"Images.ImgId {order == "DESC" and "<" or ">"} {last_uid} "
 
-    sql += f"ORDER BY Images.[Datetime] {order} OFFSET 0 ROWS FETCH NEXT {pagesize} ROWS ONLY"
+    sql += f"ORDER BY Images.Timestamp {order} OFFSET 0 ROWS FETCH NEXT {pagesize} ROWS ONLY"
 
     result = db.query(sql)
     result = [{k: v for k, v in zip(header, row)} for row in result]
     return jsonify(result)
 
 
-@app.route("/get_file/<path:filepath>")
-def get_file(filepath):
-    return send_file(f"/{filepath}", as_attachment=False)
+@app.route('/api/sites/')
+def sites():
+    try:
+        header = ["index", "siteName", "lat", "long", "id"]
+        sql = "SELECT UID, SiteName, GeoLoc.Lat, GeoLoc.Long, CamId from Cameras"
+        result = db.query(sql)
+        result = [{k: v for k, v in zip(header, row)} for row in result]
+        return jsonify(result)
+    except Exception:
+        pass
+
+
+# @app.route("/get_file/<path:filepath>")
+# def get_file(filepath):
+#     return send_file(f"/{filepath}", as_attachment=False)
+
+@app.route("/temp/png/<path:filename>")
+def get_png(filename):
+    filename = f"/{filename}"
+    try:
+        # Open the FITS file
+        with fits.open(filename) as hdul:
+            data = hdul[0].data
+
+        # Check if data is None
+        if data is None:
+            abort(400, description="No image data found in FITS file.")
+
+        # Process the data based on its shape
+        if data.ndim == 2:
+            # Grayscale image
+            image_data = normalize_data(data)
+            image = Image.fromarray(image_data, mode='L')
+        elif data.ndim == 3 and data.shape[0] == 3:
+            # RGB image with shape (3, height, width)
+            channels = [normalize_data(channel) for channel in data]
+            rgb_array = np.stack(channels, axis=-1)  # Shape: (height, width, 3)
+            image = Image.fromarray(rgb_array, mode='RGB')
+        else:
+            abort(400, description="Unsupported FITS image format.")
+
+        # Save the image to a BytesIO object
+        img_io = BytesIO()
+        image.save(img_io, format='PNG')
+        img_io.seek(0)
+
+        download_filename = filename.split("/")[-1].strip('.fits') + '.png'
+        print(download_filename)
+
+        return send_file(img_io, mimetype='image/png', as_attachment=True, download_name=download_filename)
+
+    except Exception as e:
+        abort(500, description=f"An error occurred: {str(e)}")
+
+
+@app.route('/temp/tiff/<path:filename>')
+def get_tiff(filename):
+    # Ensure the filename is safe and construct the absolute path
+    fits_path = os.path.abspath(f"/{filename}")
+    if not os.path.isfile(fits_path):
+        abort(404, description="FITS file not found.")
+
+    try:
+        # Open the FITS file
+        with fits.open(fits_path) as hdul:
+            data = hdul[0].data
+
+        # Check if data is None
+        if data is None:
+            abort(400, description="No image data found in FITS file.")
+
+        # Process the data based on its shape
+        if data.ndim == 2:
+            # Grayscale image
+            image_data = normalize_data(data)
+            image = Image.fromarray(image_data, mode='L')
+        elif data.ndim == 3 and data.shape[0] == 3:
+            # RGB image with shape (3, height, width)
+            channels = [normalize_data(channel) for channel in data]
+            rgb_array = np.stack(channels, axis=-1)  # Shape: (height, width, 3)
+            image = Image.fromarray(rgb_array, mode='RGB')
+        else:
+            abort(400, description="Unsupported FITS image format.")
+
+        # Save the image to a BytesIO object
+        img_io = BytesIO()
+        image.save(img_io, format='TIFF')
+        img_io.seek(0)
+
+        # Construct the download filename by replacing the .fits extension with .tiff
+        base_filename = os.path.basename(filename)
+        download_filename = os.path.splitext(base_filename)[0] + '.tiff'
+
+        return send_file(
+            img_io,
+            mimetype='image/tiff',
+            as_attachment=True,
+            download_name=download_filename
+        )
+
+    except Exception as e:
+        abort(500, description=f"An error occurred: {str(e)}")
+
+
+def normalize_data(data):
+    """
+    Normalize the data to the 0-255 range and convert to uint8.
+    """
+    data = np.nan_to_num(data)  # Replace NaNs with zero
+    data_min = np.min(data)
+    data_max = np.max(data)
+    if data_max - data_min == 0:
+        return np.zeros(data.shape, dtype=np.uint8)
+    normalized = (data - data_min) / (data_max - data_min)
+    return (normalized * 255).astype(np.uint8)
 
 
 # @app.route('/download_fits/<name>')
@@ -115,22 +235,22 @@ def get_file(filepath):
 #     return send_from_directory(directory=download_folder, path='.', as_attachment=True)
 
 
-# @app.route('/upload_image', methods=['POST'])
-# def upload_image():
-#     try:
-#         file = request.files['file']
-#         spec = request.form
-#         filename = file.filename
-#     except Exception:
-#         return jsonify({'error': 'No file part in the request'}), 400
-#
-#     path = os.path.join("/mnt/CamData/images", filename)
-#
-#     if filename.endswith(".jpg"):
-#         db.insert_image(path.rstrip(".jpg"), spec)
-#
-#     file.save(path)
-#     return jsonify({'message': f"File {filename} uploaded"}), 201
+@app.route('/upload_image', methods=['POST'])
+def upload_image():
+    try:
+        file = request.files['file']
+        spec = request.form
+        filename = file.filename
+    except Exception:
+        return jsonify({'error': 'No file part in the request'}), 400
+
+    path = os.path.join("/mnt/CamData/images", filename)
+
+    if filename.endswith(".jpg"):
+        db.insert_image(path.rstrip(".jpg"), spec)
+
+    file.save(path)
+    return jsonify({'message': f"File {filename} uploaded"}), 201
 #
 #
 # @app.route('/upload_data/', methods=['POST'])

@@ -14,12 +14,13 @@ const numberOfColumns = ref(0)
 const images = ref([])
 const starList = ref([]) // stores the UIDs of starred images
 const container = useTemplateRef("container")
+let condition = ''
 
 let lastUID = null
 
 async function loadMore() {
     axios.get(`${rootURL}api/query`, {
-        params: {"lastUID": lastUID}
+        params: {"lastUID": lastUID, "conditions": condition}
     }).then(response => {
         images.value.push(...response.data)
         const UIDs = response.data.map(image => image['UID'])
@@ -66,6 +67,43 @@ function handleScroll() {
     }
 }
 
+function onSearchClicked(args){
+    condition = ""
+    if (args['selectedTime'] === 'day'){
+        condition += "IsDayTime = 1"
+    } else if (args['selectedTime'] === 'night'){
+        condition += "IsDayTime = 0"
+    }
+
+    if (args['selectedSite']){
+        if (condition !== "")
+            condition += " AND "
+        condition += `Images.CamId = '${args['selectedSite']}'`
+    }
+
+    if(args['selectedDates']) {
+      if (args['selectedDates'].length > 0) {
+        if (condition !== "")
+          condition += " AND "
+        const dates = args['selectedDates']
+        if (typeof dates === 'object' && dates[0] && dates[1]) {
+          const startDate = dates[0];
+          const endDate = dates[1];
+          condition += `Timestamp >= '${startDate}' AND Timestamp <= '${endDate}'`;
+        }
+        // Check if dates is a single date string
+        else if (typeof dates === 'string') {
+
+          condition += `CAST(Timestamp AS DATE) = '${dates}'`;
+        }
+      }
+    }
+
+    console.log(condition)
+    clearSearch()
+    loadMore()
+}
+
 onMounted(() => {
     resizeObserver = new ResizeObserver(updateNumberOfColumns);
     if (container["value"]) {
@@ -88,7 +126,7 @@ onBeforeUnmount(() => {
 <template>
     <Sidebar @star-clicked="onStarClicked"/>
     <div class="container" ref="container" @resize="updateNumberOfColumns">
-        <ActionBar/>
+        <ActionBar @search-clicked="onSearchClicked"/>
         <div class="spacer">
             <div class="imgContainer">
                 <ImageCard

@@ -8,7 +8,7 @@ const width = computed(() => {
     return collapsed.value ? '52px' : '300px'
 })
 const collapsedImg = computed(() => {
-    return collapsed.value ? '../../public/toggle-right.png' : '../../public/toggle-left.png'
+    return collapsed.value ? 'http://camserver.physics.ucsb.edu/static/dist/toggle-right.png' : 'http://camserver.physics.ucsb.edu/static/dist/toggle-left.png'
 })
 
 onMounted(() => {
@@ -25,23 +25,23 @@ onMounted(() => {
             </button>
             <div>
                 <button v-show="!collapsed" id="sidebar-help-btn" class="img-button" title="help">
-                    <img src="../../public/help.png" alt=""/>
+                    <img src="http://camserver.physics.ucsb.edu/static/dist/help.png" alt=""/>
                 </button>
                 <button v-show="!collapsed" id="sidebar-more-btn" class="img-button" title="more">
-                    <img src="../../public/more.png" alt=""/>
+                    <img src="http://camserver.physics.ucsb.edu/static/dist/more.png" alt=""/>
                 </button>
             </div>
         </div>
         <h1 v-show="!collapsed">Search History</h1>
         <label v-show="!collapsed" id="search-field" class="search-field">
-            <img src="../../public/search.png" alt="">
+            <img src="http://camserver.physics.ucsb.edu/static/dist/search.png" alt="">
             <input type="text" placeholder="Search here">
         </label>
 
         <!-- Search History -->
         <div id="search-history">
             <div v-show="!collapsed" class="quick-search" @click="$emit('StarClicked')">
-                <img src="../../public/star-fill.png" alt="">
+                <img src="http://camserver.physics.ucsb.edu/static/dist/star-fill.png" alt="">
                 <span>Starred</span>
             </div>
         </div>
