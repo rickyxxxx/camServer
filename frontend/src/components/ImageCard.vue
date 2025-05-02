@@ -1,6 +1,17 @@
-<script setup>
-import {ref, computed, useTemplateRef, onMounted} from 'vue'
+<!--
+    Created by: Ruitao Xu
+    Date: 2025-04-20
+    ----------------------------------------------------------------------------------------------
+    Description: ImageCard.vue
+    This component is used to display an image card with a preview, download options, and metadata.
+    It includes a flip animation to show the back side of the card with additional information.
+    The card can be starred or unstarred, and the image can be downloaded in different formats.
+    -----------------------------------------------------------------------------------------------
 
+-->
+
+<script setup>
+import {ref, computed, useTemplateRef} from 'vue'
 
 const props = defineProps(['imgSpec', 'index', 'columns', 'rootURL'])
 defineEmits(['starred', 'starRemoved'])
@@ -41,7 +52,7 @@ const expWithUnit = computed(() => {
     let exp = parseFloat(props.imgSpec['expTime']);
     while (exp >= 1000) {
         exp /= 1000
-        units.pop()
+        units.shift()
     }
     return `${exp.toFixed(1)} ${units[0]}`
 })
@@ -77,136 +88,16 @@ async function onDownloadClicked() {
       window.location.href = `${props.rootURL}temp/tiff/${props.imgSpec.image}.fits`
     }
 }
-
-function loadFits(self) {
-    const hdu = self.getHDU();
-
-    const header = hdu.header;
-    const data = hdu.data;
-
-    const width = header.get('NAXIS1');
-    const height = header.get('NAXIS2');
-    const bitpix = header.get('BITPIX');
-
-    const array = bitpix === 16 ? new Uint16Array(data.buffer) : new Uint8Array(data.buffer);
-
-    return [array, width, height, header];
-}
-
-function toTiff() {
-    const [array, width, height, _] = loadFits(this);
-
-    let typedArray = new Uint8Array(array);
-    let bitsPerSample = [16];
-    let sampleFormat = [1]; // unsigned integer
-
-    const ifd = {
-        width,
-        height,
-        bitsPerSample,
-        samplesPerPixel: 1,
-        compression: 1,
-        photometricInterpretation: 1, // 1 = BlackIsZero
-        data: typedArray,
-        sampleFormat,
-    };
-
-    const tiffBuffer = UTIF.encodeImage(array, width, height);
-
-    const blob = new Blob([new Uint8Array(tiffBuffer)], { type: 'image/tiff' });
-
-    // Trigger download
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'converted.tiff';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-}
-
-function normalizeTo8Bit(input, bitDepth) {
-    if (bitDepth === 8) return new Uint8ClampedArray(input); // no change
-    if (bitDepth === 16) {
-        const max = 65535;
-        const normalized = new Uint8ClampedArray(input.length);
-        for (let i = 0; i < input.length; i++) {
-            normalized[i] = input[i] / max * 255;
-        }
-        return normalized;
-    }
-    throw new Error("Only 8-bit or 16-bit inputs supported.");
-}
-
-function imageArrayToImageData(data, width, height, channels = 1, bitDepth = 8) {
-    const normalized = normalizeTo8Bit(data, bitDepth);
-    const rgba = new Uint8ClampedArray(width * height * 4);
-
-    let size = width * height;
-
-    for (let ch = 0; ch < channels; ch++) {
-        for (let i = 0; i < size; i++) {
-            let x = i % width;
-            let y = Math.floor(i / width);
-
-            rgba[ch + y * 4 + x * 4 * width] = normalized[i + ch * size]
-            if (ch === 0) {
-                rgba[3 + y * 4 + x * 4 * width] = 255; // fully opaque
-            }
-        }
-    }
-
-    for (let i = 0; i < width * height; i++) {
-        const base = i * channels;
-        const r = normalized[base] ?? 0;
-        const g = channels >= 3 ? normalized[base + 1] ?? r : r;
-        const b = channels >= 3 ? normalized[base + 2] ?? r : r;
-
-        rgba[i * 4]     = r;
-        rgba[i * 4 + 1] = g;
-        rgba[i * 4 + 2] = b;
-        rgba[i * 4 + 3] = 255; // fully opaque
-    }
-
-    return new ImageData(rgba, width, height);
-}
-
-function toPNG() {
-    const [array, width, height, header] = loadFits(this);
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext("2d");
-    const imageData = imageArrayToImageData(array, width, height, header.get("NAXIS"), header.get("BITPIX"));
-    ctx.putImageData(imageData, 0, 0);
-
-    canvas.toBlob((blob) => {
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = "converted.png";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-    }, "image/png");
-}
-
-onMounted(() => {
-
-    const utif = document.createElement('script')
-    utif.src = 'https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.js'
-    document.head.appendChild(utif)
-})
-
 </script>
 
 <template>
-    <div class="card-container" @mouseenter="hover=true" @mouseleave="hover=false">
+    <div class="card-container" @mouseleave="hover=false">
         <div class="card" :class="{flipped: hover}">
 
             <! -- Front Side -->
             <div class="card-front">
                 <img v-if="isFlipped" :src="imagePath" alt="" ref="imageRef" @click="onImageClicked"/>
-                <div id="info">
+                <div id="info" @click="hover=true">
                     <h2>{{ imgSpec.siteName }}</h2>
                     <p>{{ localFormatted }}</p>
                     <p>{{utcFormatted}}</p>
@@ -335,6 +226,8 @@ img {
     text-align: center;
     width: 100%;
     height: 100%;
+    cursor: pointer;
+    border: red 1px solid;
 }
 
 #selector {
